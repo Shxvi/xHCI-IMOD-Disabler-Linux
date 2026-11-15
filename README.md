@@ -1,154 +1,182 @@
 # xHCI IMOD Disabler for Linux
 
-Адаптация утилиты **xHCI IMOD Disabler** под **Linux**.
+**English** | [Русский](README.ru.md)
 
-Позволяет отключить аппаратную модерацию прерываний (**Interrupt Moderation / IMOD**) на контроллерах USB 3.x (xHCI), устанавливая значение регистра IMOD в **`0`** (задержка **0 µs** вместо стандартных 40–50 µs).
+Linux port and adaptation of **xHCI IMOD Disabler**.
 
-Это критически важно для соревновательного гейминга, высокочастотных мышей (1000 Hz, 4000 Hz, 8000 Hz) и профессионального звука с ультранизкой задержкой: события USB доставляются в CPU мгновенно без пачкирования и искусственной задержки.
+Disables xHCI Interrupt Moderation (**IMOD**) on selected USB 3.x Host Controllers by setting the IMOD register interval to **`0`** (**`0 µs`** delay instead of the kernel/hardware default 40–50 µs).
+
+Eliminating interrupt throttling allows high-polling-rate devices (1000 Hz, 4000 Hz, 8000 Hz mice and keyboards) and low-latency audio interfaces to deliver events to the CPU immediately without batching delays.
 
 ---
 
-## 🚀 Быстрый старт
+## ⚡ Features
 
-### 1. Сборка утилиты
+- **Full Feature Parity with Windows Original:**
+  - Modern interactive terminal TUI with arrow keys and number shortcuts.
+  - Controller routing discovery: identifies **CPU-direct**, **Chipset**, **Thunderbolt**, and **Add-in cards**, along with hop count to the CPU.
+  - Complete USB device tree: identifies gaming mice, keyboards, audio devices, hubs, speeds, and physical ports.
+  - **Latency Optimization Tips:** highlights your gaming mouse, detects external USB hub routing, and recommends CPU-direct controller ports for minimum jitter.
+  - Safe JSON backup and restore (`~/.config/xhci-imod/backup.json`).
+  - Moderation testing mode (`16 ms / 62.5 Hz` to feel the latency difference).
+  - Controller selection menu to include or exclude specific host controllers.
+  - Headless `--silent` mode and ready-to-use **systemd service** for automatic application on system boot.
+- **Dual Register Access Backends:**
+  1. **Userspace MMIO (sysfs):** Direct access through `/sys/bus/pci/devices/<bdf>/resource0` when booted with `iomem=relaxed` (no custom drivers or compilation needed).
+  2. **Companion Kernel Module (`xhci_imod`):** Clean kernel module using `ioremap` for systems where boot parameters cannot be changed, providing a `/sys/kernel/xhci_imod/` sysfs control interface.
+
+---
+
+## 🚀 Quick Start
+
+### 1. Build the utility
 ```bash
 make
 ```
-Бинарный файл `xhci-imod-disabler` соберется в текущей папке.
+The compiled binary `xhci-imod-disabler` will be built in the root directory.
 
-### 2. Просмотр статуса контроллеров (без root)
+### 2. View controller topology (No root required)
 ```bash
 ./xhci-imod-disabler --status
 ```
-Выведет список xHCI-контроллеров, физическую топологию, подключенную мышь и подсказки по минимальной задержке.
+Displays all xHCI controllers, connected USB devices, your mouse position, and latency optimization tips.
 
 ---
 
-## ⚙️ Способы доступа к регистрам (Как отключить IMOD)
+## ⚙️ Register Access Setup (How to Disable IMOD)
 
-В Linux доступ к MMIO контроллеров требует прав суперпользователя (`sudo`), а стандартное ядро защищает занятые драйверами диапазоны памяти (`CONFIG_IO_STRICT_DEVMEM`). Есть два простых пути решения:
+In Linux, hardware MMIO access requires `sudo` privileges. Additionally, modern kernels protect active driver address ranges via `CONFIG_IO_STRICT_DEVMEM`. Choose one of the two solutions below:
 
-### Вариант 1 (Рекомендуемый для геймеров): параметр `iomem=relaxed`
-Большинство геймеров и оптимизаторов задержки на Linux уже используют этот параметр. Он отключает защиту `CONFIG_IO_STRICT_DEVMEM` и разрешает прямой доступ к регистрам PCI MMIO из пользовательского пространства.
+### Method 1 (Recommended for Gaming): Kernel Parameter `iomem=relaxed`
+Most Linux gaming distributions and latency tuners use this parameter. It unlocks direct userspace PCI MMIO access for root without compiling kernel modules.
 
-#### 1. Добавление параметра в зависимости от вашего дистрибутива и загрузчика:
+#### 1. Add `iomem=relaxed` based on your bootloader:
 
-- **CachyOS / Arch Linux (systemd-boot с UKI — Unified Kernel Images):**
-  1. Откройте файл `/etc/kernel/cmdline` от имени суперпользователя:
+- **CachyOS / Arch Linux (systemd-boot with UKI — Unified Kernel Images):**
+  1. Open `/etc/kernel/cmdline` as root:
      ```bash
      sudo nano /etc/kernel/cmdline
      ```
-  2. Добавьте в конец строки через пробел: `iomem=relaxed`
-  3. **ОБЯЗАТЕЛЬНО пересоберите загрузочный UKI-образ** (без этого параметр останется только в текстовом файле и не попадет в ядро!):
+  2. Append `iomem=relaxed` to the end of the line (separated by a space).
+  3. **IMPORTANT: Rebuild your UKI boot image:**
      ```bash
      sudo mkinitcpio -P
      ```
+     *(Without this command, the parameter is not embedded into the `.efi` binary and will not take effect upon reboot!)*
 
-- **GRUB (Ubuntu / Debian / Linux Mint / Fedora / Arch с GRUB):**
-  1. Откройте `/etc/default/grub`:
+- **GRUB (Ubuntu / Debian / Linux Mint / Fedora / Arch with GRUB):**
+  1. Open `/etc/default/grub`:
      ```bash
      sudo nano /etc/default/grub
      ```
-  2. В строке `GRUB_CMDLINE_LINUX_DEFAULT="..."` допишите `iomem=relaxed`.
-  3. Обновите конфигурацию GRUB:
+  2. Append `iomem=relaxed` inside `GRUB_CMDLINE_LINUX_DEFAULT="..."`.
+  3. Update GRUB:
      ```bash
-     # Ubuntu / Debian:
+     # Ubuntu / Debian / Linux Mint:
      sudo update-grub
 
-     # Arch / Fedora:
+     # Arch / Fedora / openSUSE:
      sudo grub-mkconfig -o /boot/grub/grub.cfg
      ```
 
-- **systemd-boot (стандартный, без UKI):**
-  1. Откройте текущую конфигурационную запись в `/boot/loader/entries/*.conf`.
-  2. В строке `options` в конец добавьте `iomem=relaxed`.
+- **systemd-boot (Standard entries, without UKI):**
+  1. Open your boot entry file in `/boot/loader/entries/*.conf`.
+  2. Append `iomem=relaxed` to the `options` line.
 
-#### 2. Перезагрузка и проверка:
-1. Перезагрузите ПК:
+#### 2. Reboot and verify:
+1. Reboot:
    ```bash
    sudo reboot
    ```
-2. **Проверьте, применился ли параметр к текущему ядру:**
+2. Verify that the parameter is active in the running kernel:
    ```bash
    cat /proc/cmdline | grep iomem
    ```
    > [!IMPORTANT]
-   > В выводе команды обязательно должно присутствовать `iomem=relaxed`. Если его там нет — значит, образ загрузчика не был обновлен после правки файла конфигурации!
+   > You must see `iomem=relaxed` in the output. If it is missing, your bootloader or UKI image was not regenerated!
 
-#### 3. Запуск утилиты:
-Запускайте утилиту обязательно с **`sudo`** (доступ к MMIO железа закрыт для непривилегированных пользователей):
+#### 3. Run with sudo:
 ```bash
 sudo ./xhci-imod-disabler
 ```
-Всё работает напрямую в userspace без сборки сторонних модулей!
-
+Everything operates directly from userspace with zero external kernel drivers!
 
 ---
 
-### Вариант 2: Модуль ядра `xhci_imod` (Без изменения параметров загрузки)
-Если вы не хотите менять параметры ядра или перезагружаться:
+### Method 2: Kernel Module `xhci_imod` (No boot parameter changes needed)
+If you prefer not to touch kernel command-line arguments:
 
-1. Установите заголовки ядра (например, `sudo pacman -S linux-headers` или `sudo pacman -S linux-cachyos-headers` на Arch/CachyOS, либо `sudo apt install linux-headers-$(uname -r)` на Ubuntu/Debian).
-2. Соберите и загрузите модуль:
+1. Install kernel headers for your active kernel:
+   - **Arch / CachyOS:** `sudo pacman -S linux-headers` (or `linux-cachyos-headers`)
+   - **Ubuntu / Debian:** `sudo apt install linux-headers-$(uname -r)`
+   - **Fedora:** `sudo dnf install kernel-devel`
+2. Build and load the module:
    ```bash
-   cd linux/kernel-module
+   cd kernel-module
    make
    sudo make load
    ```
-   Модуль сразу же переведет IMOD всех xHCI-контроллеров в 0 (отключено).
-3. Теперь `sudo ./xhci-imod-disabler` сможет считывать и менять настройки через созданный модулем интерфейс `/sys/kernel/xhci_imod/`.
+   The module immediately zeros out IMOD on all xHCI controllers upon loading.
+3. Now `sudo ./xhci-imod-disabler` can read and write settings through `/sys/kernel/xhci_imod/`.
 
 ---
 
-## 🖥 Использование утилиты
+## 🖥 Usage
 
-### Интерактивное меню (TUI)
+### Interactive Menu (TUI)
 ```bash
 sudo ./xhci-imod-disabler
 ```
-- **1. Controller Status & USB Topology:** Детальная информация по каждому контроллеру и устройствам.
+- **1. Controller Status & USB Topology:** Detailed view of controllers and connected devices.
 - **2. IMOD Options:**
-  - `1. Backup Current IMOD Values`: Сохранить текущие значения в JSON.
-  - `2. Restore IMOD Values from Backup`: Вернуть сохраненные значения.
-  - `3. Test IMOD (62.5 Hz / 16 ms)`: Включить жесткую модерацию для проверки разницы.
-  - `4. Disable IMOD (0 µs)`: Полностью выключить модерацию (IMOD = 0).
-  - `5. Set Custom IMOD Value`: Задать произвольный интервал в шагах по 250 ns.
-- **3. Controller Selection:** Выбрать, на каких именно контроллерах отключать IMOD.
-- **4. Startup Options:** Установить/удалить systemd-сервис автозапуска.
+  - `1. Backup Current IMOD Values`: Save current values to JSON.
+  - `2. Restore IMOD Values from Backup`: Restore previous intervals.
+  - `3. Test IMOD (62.5 Hz / 16 ms)`: Apply high latency to feel the difference.
+  - `4. Disable IMOD (0 µs)`: Set IMOD to 0 (Zero moderation).
+  - `5. Set Custom IMOD Value`: Set arbitrary interval in 250 ns units.
+- **3. Controller Selection:** Toggle individual controllers to include/exclude.
+- **4. Startup Options:** Enable/disable the systemd autostart service.
 
-### Командная строка (CLI / Скрипты)
-- `sudo ./xhci-imod-disabler --status` — показать текущий статус.
-- `sudo ./xhci-imod-disabler --disable` — отключить IMOD на выбранных контроллерах.
-- `sudo ./xhci-imod-disabler --restore` — восстановить значения из бэкапа.
-- `sudo ./xhci-imod-disabler --test` — включить тестовый режим 16 ms.
-- `sudo ./xhci-imod-disabler --set 0x00A0` — установить конкретное значение (например, Linux default 40 µs).
-- `sudo ./xhci-imod-disabler --silent` — тихий режим без вывода в консоль (код возврата 0 при успехе).
+### Command Line Interface (CLI)
+- `sudo ./xhci-imod-disabler --status` — Display status and topology.
+- `sudo ./xhci-imod-disabler --disable` — Disable IMOD on selected controllers.
+- `sudo ./xhci-imod-disabler --restore` — Restore original IMOD values from backup.
+- `sudo ./xhci-imod-disabler --test` — Apply test interval (16 ms).
+- `sudo ./xhci-imod-disabler --set 0x00A0` — Set custom value (e.g., Linux default 40 µs).
+- `sudo ./xhci-imod-disabler --silent` — Headless mode with exit code 0 on success.
 
 ---
 
-## 🔄 Автозагрузка (Systemd)
+## 🔄 Autostart on Boot (Systemd)
 
-Чтобы IMOD автоматически отключался при каждом включении системы:
+To automatically disable IMOD on every boot:
 
 ```bash
-# Установка бинарника в /usr/local/bin
+# 1. Install binary and service file
 sudo make install
 
-# Включение сервиса
+# 2. Enable and start systemd service
 sudo systemctl enable --now xhci-imod.service
 ```
 
 ---
 
-## 📈 Проверка результата
+## 📈 Verification
 
-1. Запустите:
+1. Check controller status:
    ```bash
    sudo ./xhci-imod-disabler --status
    ```
-   В поле `Current IMOD` будет отображаться: `Disabled (0 µs / 0x0000)`.
-2. При использовании модуля ядра можно проверить через sysfs:
+   The `Current IMOD` line will show: **`Disabled (0 µs / 0x0000)`**.
+2. If using the kernel module:
    ```bash
    cat /sys/kernel/xhci_imod/*/imod
    ```
-3. Проверить частоту опроса и задержку мыши можно утилитами `evhz` или `mouse-probe`.
+3. Test your mouse polling rate and jitter using tools like `evhz` or `mouse-probe`.
+
+---
+
+## 📜 License
+
+Licensed under the [GNU General Public License v3.0](LICENSE).
+Based on the original [xHCI-IMOD-Disabler](https://github.com/QuakedK/xHCI-IMOD-Disabler) by QuakedK.
