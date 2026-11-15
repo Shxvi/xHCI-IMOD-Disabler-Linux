@@ -1,0 +1,12 @@
+[Unit]
+Description=xHCI Interrupt Moderation (IMOD) Disabler
+After=systemd-udev-settle.service local-fs.target
+Documentation=https://github.com/QuakedK/xHCI-IMOD-Disabler
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/xhci-imod-disabler --silent
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target

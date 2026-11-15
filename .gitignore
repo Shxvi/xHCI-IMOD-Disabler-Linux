@@ -1,0 +1,13 @@
+xhci-imod-disabler
+*.o
+*.ko
+*.mod
+*.mod.c
+*.mod.o
+*.order
+*.symvers
+.tmp_versions/
+.*.cmd
+.cache.mk
+Module.symvers
+modules.order
