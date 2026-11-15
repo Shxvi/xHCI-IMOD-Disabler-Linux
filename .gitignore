@@ -11,3 +11,5 @@ xhci-imod-disabler
 .cache.mk
 Module.symvers
 modules.order
+*.tar.gz
+
